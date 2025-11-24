@@ -1,9 +1,9 @@
-Include Irvine32.inc
-main	EQU start@0
+INCLUDE Irvine32.inc
+main EQU start@0
 
 cubeSize = 1
 lineSize = 10
-borderX = 119    
+borderX = 119
 borderY = 30
 
 .data
@@ -28,6 +28,13 @@ startMSGAttribute WORD LENGTHOF startMSG DUP(1001b)
 exitMSG BYTE "Press ESC to exit", 0
 exitMSGPosition COORD <20, 22>
 exitMSGAttribute WORD LENGTHOF exitMSG DUP(1100b)
+
+; Difficulty selection messages
+difficultyMSG BYTE "Choose Difficulty: 1 = Easy, 2 = Hard", 0
+difficultyPos COORD <20, 25>
+
+; game speed variable (ticks per move)
+gameSpeed DWORD ?
 
 ;"GAME OVER"
 gameOverMSG0 BYTE "  ****       *     *       * ******       *****   *       * ****** *****  ", 0
@@ -58,7 +65,7 @@ bytesWritten DWORD 0
 ; Cube
 cubeCurrentPosition COORD <50, 5>
 cubePreviousPosition COORD <?, 5>
-cubeBody BYTE ' '
+cubeBody BYTE '█'             ; Make cube visible
 ; Line
 line1 COORD <50, 15>
 line1Previous COORD <>
@@ -78,7 +85,7 @@ randomNum DWORD ?
 ; Score
 score DWORD 0
 startTime DWORD ?
-; Game Tik
+; Game Tick
 TICK DWORD 0
 ; Border
 border COORD <100, 30>
@@ -134,7 +141,6 @@ initialize ENDP
 ;===================================================;
 ;                     Move Cube                     ;
 ;===================================================;
-; Left
 cubeMoveLeft PROC USES ax bx
     .IF cubeCurrentPosition.X > 1
         mov ax, cubeCurrentPosition.X
@@ -146,7 +152,6 @@ cubeMoveLeft PROC USES ax bx
     ret
 cubeMoveLeft ENDP
 
-; Right
 cubeMoveRight PROC USES ax bx
     .IF cubeCurrentPosition.X < borderX
         mov ax, cubeCurrentPosition.X
@@ -158,9 +163,16 @@ cubeMoveRight PROC USES ax bx
     ret
 cubeMoveRight ENDP
 
-; Up or Down
-cubeMoveUp PROC USES ax bx
+cubeMoveDown PROC USES ax bx
+    mov ax, cubeCurrentPosition.X
+    mov bx, cubeCurrentPosition.Y
+    mov cubePreviousPosition.X, ax
+    mov cubePreviousPosition.Y, bx
+    add cubeCurrentPosition.Y, 1
+    ret
+cubeMoveDown ENDP
 
+cubeMoveUp PROC USES ax bx
     mov ax, cubeCurrentPosition.X
     mov bx, cubeCurrentPosition.Y
     mov cubePreviousPosition.X, ax
@@ -182,28 +194,13 @@ cubeMoveUp PROC USES ax bx
             mov ax, line5.Y
             mov cubeCurrentPosition.Y, ax
         .ENDIF
-    .ELSE
-        sub cubeCurrentPosition.Y, 1 
     .ENDIF
-    
     ret
 cubeMoveUp ENDP
-
-cubeMoveDown PROC USES ax bx
-    
-    mov ax, cubeCurrentPosition.X
-    mov bx, cubeCurrentPosition.Y
-    mov cubePreviousPosition.X, ax
-    mov cubePreviousPosition.Y, bx
-    add cubeCurrentPosition.Y, 1
-    
-    ret
-cubeMoveDown ENDP
 
 ;===================================================;
 ;                 Get Random Number                 ;
 ;===================================================;
-
 getRandomNumber PROC USES eax ebx
     call Randomize
     mov eax, 1000000
@@ -212,11 +209,9 @@ getRandomNumber PROC USES eax ebx
     ret
 getRandomNumber ENDP
 
-
 ;===================================================;
 ;                     Move Line                     ;
 ;===================================================;
-
 lineMoveUp PROC USES eax ebx ecx edx
     ; move line 1
     mov ax, line1.X
@@ -290,7 +285,7 @@ lineMoveUp PROC USES eax ebx ecx edx
         mov line4.X, dx
         mov line4.Y, 30
     .ENDIF
-    ; mov line 5
+    ; move line 5
     mov ax, line5.X
     mov bx, line5.Y
     mov line5Previous.X, ax
@@ -314,101 +309,36 @@ lineMoveUp ENDP
 ;===================================================;
 ;                     Draw Cube                     ;
 ;===================================================;
-
 drawCube PROC USES eax
-    ; Wipe up previous cube
-    invoke SetConsoleCursorPosition, outputHandle, cubePreviousPosition ; Set cursor position to where text should be written
-    mov eax, 15 + 0*16
-    call SetTextColor   ; Set cube's color
-    push eax
-    mov al, cubeBody    ; Print the cube
+    ; erase old cube
+    invoke SetConsoleCursorPosition, outputHandle, cubePreviousPosition
+    mov al, ' '
     call WriteChar
-    ; Draw new cube
+
+    ; draw new cube
     invoke SetConsoleCursorPosition, outputHandle, cubeCurrentPosition
-    mov eax, 0 + 11*16
-    call SetTextColor
     mov al, cubeBody
     call WriteChar
-    ; Restore to default setting
-    pop eax
-    call SetTextColor
     ret
 drawCube ENDP
 
 ;===================================================;
 ;                     Draw Line                     ;
 ;===================================================;
-
 drawLine PROC
-    invoke WriteConsoleOutputCharacter,
-      outputHandle, 
-      ADDR removeLineBody,
-      lineLength,
-      line1Previous,
-      ADDR cellsWritten
- 
-    invoke WriteConsoleOutputCharacter,
-      outputHandle, 
-      ADDR removeLineBody,
-      lineLength,
-      line2Previous,
-      ADDR cellsWritten
- 
-    invoke WriteConsoleOutputCharacter,
-      outputHandle, 
-      ADDR removeLineBody,
-      lineLength,
-      line3Previous,
-      ADDR cellsWritten
-    
-    invoke WriteConsoleOutputCharacter,
-      outputHandle, 
-      ADDR removeLineBody,
-      lineLength,
-      line4Previous,
-      ADDR cellsWritten
+    ; erase old lines
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR removeLineBody, lineLength, line1Previous, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR removeLineBody, lineLength, line2Previous, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR removeLineBody, lineLength, line3Previous, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR removeLineBody, lineLength, line4Previous, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR removeLineBody, lineLength, line5Previous, ADDR cellsWritten
 
-    invoke WriteConsoleOutputCharacter,
-      outputHandle, 
-      ADDR removeLineBody,
-      lineLength,
-      line5Previous,
-      ADDR cellsWritten
-
-    invoke WriteConsoleOutputCharacter, 
-      outputHandle, 
-      ADDR lineBody,
-      lineLength,
-      line1,
-      ADDR cellsWritten
-
-    invoke WriteConsoleOutputCharacter, 
-      outputHandle, 
-      ADDR lineBody,
-      lineLength,
-      line2,
-      ADDR cellsWritten
-
-    invoke WriteConsoleOutputCharacter, 
-      outputHandle, 
-      ADDR lineBody,
-      lineLength,
-      line3,
-      ADDR cellsWritten
-
-    invoke WriteConsoleOutputCharacter, 
-      outputHandle, 
-      ADDR lineBody,
-      lineLength,
-      line4,
-      ADDR cellsWritten
-
-    invoke WriteConsoleOutputCharacter, 
-      outputHandle, 
-      ADDR lineBody,
-      lineLength,
-      line5,
-      ADDR cellsWritten
+    ; draw new lines
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR lineBody, lineLength, line1, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR lineBody, lineLength, line2, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR lineBody, lineLength, line3, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR lineBody, lineLength, line4, ADDR cellsWritten
+    invoke WriteConsoleOutputCharacter, outputHandle, ADDR lineBody, lineLength, line5, ADDR cellsWritten
     ret
 drawLine ENDP
 
@@ -416,11 +346,11 @@ drawLine ENDP
 ;          Check if object is out of border         ;
 ;===================================================;
 isOutOfBorder PROC
-    .IF cubeCurrentPosition.X >= borderX  
+    .IF cubeCurrentPosition.X >= borderX
         mov isOut, 1
     .ELSEIF cubeCurrentPosition.X <= 1
         mov isOut, 1
-    .ELSEIF cubeCurrentPosition.Y > borderY  
+    .ELSEIF cubeCurrentPosition.Y > borderY
         mov isOut, 1
     .ELSEIF cubeCurrentPosition.Y < 1
         mov isOut, 1
@@ -434,7 +364,6 @@ isOutOfBorder ENDP
 ;            Check if object is grounded            ;
 ;===================================================;
 isGrounded PROC USES eax ebx ecx edx
-    ;TODO:Complete isGrounded procedure
     ; Check line 1
     mov ax, line1.X
     mov bx, ax
@@ -442,55 +371,55 @@ isGrounded PROC USES eax ebx ecx edx
     mov dx, cx
     add ax, lineSize
     sub dx, 1
-    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx && cubeCurrentPosition.Y <= cx
         mov isOnTheGround, 1
         mov whichLine, 1
         jmp leave_proc
     .ENDIF
-    ; Check Line 2
+    ; Check line 2
     mov ax, line2.X
     mov bx, ax
     mov cx, line2.Y
     mov dx, cx
     add ax, lineSize
     sub dx, 1
-    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx && cubeCurrentPosition.Y <= cx
         mov isOnTheGround, 1
         mov whichLine, 2
         jmp leave_proc
     .ENDIF
-    ; Check Line 3
+    ; Check line 3
     mov ax, line3.X
     mov bx, ax
     mov cx, line3.Y
     mov dx, cx
     add ax, lineSize
     sub dx, 1
-    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx && cubeCurrentPosition.Y <= cx
         mov isOnTheGround, 1
         mov whichLine, 3
         jmp leave_proc
     .ENDIF
-    ; Check Line 4
+    ; Check line 4
     mov ax, line4.X
     mov bx, ax
     mov cx, line4.Y
     mov dx, cx
     add ax, lineSize
     sub dx, 1
-    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx && cubeCurrentPosition.Y <= cx
         mov isOnTheGround, 1
         mov whichLine, 4
         jmp leave_proc
     .ENDIF
-    ; Check Line 5
+    ; Check line 5
     mov ax, line5.X
     mov bx, ax
     mov cx, line5.Y
     mov dx, cx
     add ax, lineSize
     sub dx, 1
-    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx && cubeCurrentPosition.Y <= cx
         mov isOnTheGround, 1
         mov whichLine, 5
         jmp leave_proc
@@ -499,10 +428,6 @@ isGrounded PROC USES eax ebx ecx edx
 leave_proc:
     ret
 isGrounded ENDP
-
-
-
-
 
 ;===================================================;
 ;                       Score                       ;
@@ -515,37 +440,59 @@ get_score PROC USES eax
 get_score ENDP
 
 ;===================================================;
+;                  Choose Difficulty                ;
+;===================================================;
+chooseDifficulty PROC USES ax
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR difficultyMSG, LENGTHOF difficultyMSG, difficultyPos, ADDR bytesWritten
+wait_key_diff:
+    CALL ReadChar
+    CMP al, '1'
+    JE easy_mode
+    CMP al, '2'
+    JE hard_mode
+    JMP wait_key_diff
+easy_mode:
+    mov dword ptr [gameSpeed], 300
+    ret
+hard_mode:
+    mov dword ptr [gameSpeed], 150
+    ret
+chooseDifficulty ENDP
+
+;===================================================;
 ;                      GameLoop                     ;
 ;===================================================;
 GameLoop PROC USES eax ebx ecx edx
     call Clrscr
     .WHILE TRUE
+        ; Continuous key detection
+        invoke ReadKey
+        CMP ax, 1E61h   ; 'a'
+        JE left_pressed
+        CMP ax, 2064h   ; 'd'
+        JE right_pressed
+        JMP no_key
+left_pressed:
+        invoke cubeMoveLeft
+        JMP no_key
+right_pressed:
+        invoke cubeMoveRight
+no_key:
+        ; Gravity: Cube falls if not grounded
         invoke isGrounded
-        call ReadKey
-        .IF ax == 1E61h
-            ;TODO: move cube left
-            invoke cubeMoveLeft
-            invoke isGrounded
-        .ELSEIF ax == 2064h
-            ;TODO: move cube right
-            invoke cubeMoveRight
-            invoke isGrounded
+        .IF isOnTheGround == 0
+            invoke cubeMoveDown
         .ENDIF
-        ; Move Line & Cube Up
+        ; Move lines every tick
         xor edx, edx
         mov eax, TICK
-        mov ebx, 375
+        mov ebx, gameSpeed
         div ebx
         .IF edx == 0
-            .IF isOnTheGround == 1
-                invoke lineMoveUp
-                invoke cubeMoveUp
-            .ELSEIF isOnTheGround == 0
-                 invoke lineMoveUp
-                 invoke cubeMoveDown
-            .ENDIF
+            invoke lineMoveUp
             mov TICK, 0
         .ENDIF
+        ; Draw everything
         invoke drawLine
         invoke drawCube
         invoke isOutOfBorder
@@ -554,11 +501,9 @@ GameLoop PROC USES eax ebx ecx edx
         .ENDIF
         inc TICK
     .ENDW
-    leave_proc:
+leave_proc:
     ret
 GameLoop ENDP
-
-
 
 ;===================================================;
 ;                        Main                       ;
@@ -568,219 +513,81 @@ newGame:
     INVOKE GetStdHandle, STD_OUTPUT_HANDLE
     mov outputHandle, eax
     CALL Clrscr
-
     INVOKE SetConsoleTitle, ADDR titleMSG
 
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameMSG0,
-        LENGTHOF gameMSG0,
-        gameMSGPosition,
-        ADDR bytesWritten
-    
+    ; Draw title
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameMSG0, LENGTHOF gameMSG0, gameMSGPosition, ADDR bytesWritten
     inc gameMSGPosition.Y
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameMSG1,
-        LENGTHOF gameMSG1,
-        gameMSGPosition,
-        ADDR bytesWritten
-    
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameMSG1, LENGTHOF gameMSG1, gameMSGPosition, ADDR bytesWritten
     inc gameMSGPosition.Y
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameMSG2,
-        LENGTHOF gameMSG2,
-        gameMSGPosition,
-        ADDR bytesWritten
-    
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameMSG2, LENGTHOF gameMSG2, gameMSGPosition, ADDR bytesWritten
     inc gameMSGPosition.Y
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameMSG3,
-        LENGTHOF gameMSG3,
-        gameMSGPosition,
-        ADDR bytesWritten
-    
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameMSG3, LENGTHOF gameMSG3, gameMSGPosition, ADDR bytesWritten
     inc gameMSGPosition.Y
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameMSG4,
-        LENGTHOF gameMSG4,
-        gameMSGPosition,
-        ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameMSG4, LENGTHOF gameMSG4, gameMSGPosition, ADDR bytesWritten
     sub gameMSGPosition.Y, 4
 
-    INVOKE  WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR instructionMSG,
-        LENGTHOF instructionMSG,
-        instructionMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR startMSGAttribute,
-        LENGTHOF startMSG,
-        startMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR startMSG,
-        LENGTHOF startMSG,
-        startMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR exitMSGAttribute,
-        LENGTHOF exitMSG,
-        exitMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR exitMSG,
-        LENGTHOF exitMSG,
-        exitMSGPosition,
-        ADDR bytesWritten
+    ; Instructions
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR instructionMSG, LENGTHOF instructionMSG, instructionMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR startMSGAttribute, LENGTHOF startMSG, startMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR startMSG, LENGTHOF startMSG, startMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR exitMSGAttribute, LENGTHOF exitMSG, exitMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR exitMSG, LENGTHOF exitMSG, exitMSGPosition, ADDR bytesWritten
 
     xor ax, ax
 waitForInput:
     CALL ReadChar
-    CMP ax, 0       ;There is no key pressed
+    CMP ax, 0
     JE waitForInput
-    CMP ax, 011Bh   ;The user presses ESC
+    CMP ax, 011Bh
     JE exitGame
 
-start:
-;==============================================;
-;             start the game loop              ;
-;==============================================;
+    ; Choose difficulty
+    INVOKE chooseDifficulty
     push eax
-    call GetMseconds ; get time to count score
+    call GetMseconds
     mov startTime, eax
     pop eax
 
+    ; Start game loop
     invoke GameLoop
 
 gameOver:
     CALL Clrscr
-
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR gameOverMSGAttribute,
-        LENGTHOF gameOverMSG0,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameOverMSG0,
-        LENGTHOF gameOverMSG0,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-    
+    ; Draw game over message
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR gameOverMSGAttribute, LENGTHOF gameOverMSG0, gameOverMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameOverMSG0, LENGTHOF gameOverMSG0, gameOverMSGPosition, ADDR bytesWritten
     inc gameOverMSGPosition.Y
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR gameOverMSGAttribute,
-        LENGTHOF gameOverMSG1,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameOverMSG1,
-        LENGTHOF gameOverMSG1,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR gameOverMSGAttribute, LENGTHOF gameOverMSG1, gameOverMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameOverMSG1, LENGTHOF gameOverMSG1, gameOverMSGPosition, ADDR bytesWritten
     inc gameOverMSGPosition.Y
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR gameOverMSGAttribute,
-        LENGTHOF gameOverMSG2,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameOverMSG2,
-        LENGTHOF gameOverMSG2,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-    
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR gameOverMSGAttribute, LENGTHOF gameOverMSG2, gameOverMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameOverMSG2, LENGTHOF gameOverMSG2, gameOverMSGPosition, ADDR bytesWritten
     inc gameOverMSGPosition.Y
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR gameOverMSGAttribute,
-        LENGTHOF gameOverMSG3,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameOverMSG3,
-        LENGTHOF gameOverMSG3,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR gameOverMSGAttribute, LENGTHOF gameOverMSG3, gameOverMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameOverMSG3, LENGTHOF gameOverMSG3, gameOverMSGPosition, ADDR bytesWritten
     inc gameOverMSGPosition.Y
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR gameOverMSGAttribute,
-        LENGTHOF gameOverMSG4,
-        gameOverMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR gameOverMSG4,
-        LENGTHOF gameOverMSG4,
-        gameOverMSGPosition,
-        ADDR bytesWritten
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR gameOverMSGAttribute, LENGTHOF gameOverMSG4, gameOverMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR gameOverMSG4, LENGTHOF gameOverMSG4, gameOverMSGPosition, ADDR bytesWritten
     sub gameOverMSGPosition.Y, 4
 
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR scoreMSG,
-        LENGTHOF scoreMSG,
-        scoreMSGPosition,
-        ADDR bytesWritten
+    ; Print score
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR scoreMSG, LENGTHOF scoreMSG, scoreMSGPosition, ADDR bytesWritten
+    INVOKE SetConsoleCursorPosition, outputHandle, scorePosition
+    call get_score
+    mov eax, score
+    CALL WriteDec
 
-    ;print the score
-    INVOKE SetConsoleCursorPosition,
-        outputHandle,
-        scorePosition
-     call get_score
-     mov eax, score
-     CALL WriteDec
-    
-    INVOKE WriteConsoleOutputAttribute,
-        outputHandle,
-        ADDR returnMSGAttribute,
-        LENGTHOF returnMSG,
-        returnMSGPosition,
-        ADDR bytesWritten
-
-    INVOKE WriteConsoleOutputCharacter,
-        outputHandle,
-        ADDR returnMSG,
-        LENGTHOF returnMSG,
-        returnMSGPosition,
-        ADDR bytesWritten
+    ; Prompt to return
+    INVOKE WriteConsoleOutputAttribute, outputHandle, ADDR returnMSGAttribute, LENGTHOF returnMSG, returnMSGPosition, ADDR bytesWritten
+    INVOKE WriteConsoleOutputCharacter, outputHandle, ADDR returnMSG, LENGTHOF returnMSG, returnMSGPosition, ADDR bytesWritten
 
     xor ax, ax
 waitTillInput:
     CALL ReadChar
     CMP ax, 0
     JE waitTillInput
-;================================================;
-;                Reset the game                  ;
-;      Reset the old variables if necessary      ;
-;================================================;
+
     CALL initialize
     JMP newGame
 
