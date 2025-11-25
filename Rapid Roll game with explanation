@@ -1,0 +1,1032 @@
+; Include Irvine32 library (console helpers, RandomRange, etc.)
+Include Irvine32.inc
+; Define entry point label for the linker
+main	EQU start@0
+
+; Configuration constants
+; size of the cube drawn (1 cell)
+cubeSize = 1
+; length of each platform line in characters
+lineSize = 12
+; right border X coordinate (max X)
+borderX = 119    
+; bottom border Y coordinate (max Y)
+borderY = 30
+
+.data
+;==============================================================================;
+;                                  For Menu /Start                             ;
+;==============================================================================;
+; Console title message (null-terminated)
+titleMSG BYTE "Rapid Roll - Enhanced Edition", 0       
+; ASCII-art game title lines (each null-terminated)
+gameMSG0 BYTE "  ******* ***** ***** ***** *****       ******* ***** ***** **     ", 0
+gameMSG1 BYTE "  *     * *   * *   *   *   *     *     *     * *   * *     *     ", 0
+gameMSG2 BYTE "  ******* ***** *****   *   *     *     ******* *   * *     *     ", 0
+gameMSG3 BYTE "  *   *   *   * *       *   *     *     *   *   *   * *     *     ", 0
+gameMSG4 BYTE "  *    *  *   * *     ***** *****       *    *  ***** ***** ***** ", 0
+; Position where gameMSG0 will be printed (COORD structure)
+gameMSGPosition COORD <18, 5>
+; Attribute (color) data for gameMSG (set colors for entire line)
+gameMSGAttribute WORD LENGTHOF gameMSG0 DUP(1110b)
+
+; Instruction message text and position/attribute
+instructionMSG BYTE "    Use [A] and [D] keys to move left and right    ", 0
+instructionMSGPosition COORD <18, 14>
+instructionMSGAttribute WORD LENGTHOF instructionMSG DUP(1011b)
+
+; Controls explanation text and position/attribute
+controlsMSG BYTE "    Stay on the platforms and survive as long as you can!    ", 0
+controlsMSGPosition COORD <15, 16>
+controlsMSGAttribute WORD LENGTHOF controlsMSG DUP(0011b)
+
+; Prompt to start the game
+startMSG BYTE "         >>> Press ANY KEY to Start <<<         ", 0
+startMSGPosition COORD <20, 20>
+startMSGAttribute WORD LENGTHOF startMSG DUP(1010b)
+
+; Exit hint prompt
+exitMSG BYTE "              Press [ESC] to Exit              ", 0
+exitMSGPosition COORD <20, 23>
+exitMSGAttribute WORD LENGTHOF exitMSG DUP(1100b)
+
+; "GAME OVER" ASCII art lines and their position/attribute
+;"GAME OVER"
+gameOverMSG0 BYTE "   ****      *     *     * ******      ****  *     * ****** ****   ", 0
+gameOverMSG1 BYTE "  *        *   *   **   ** *          *    *  *   *  *      *   *  ", 0
+gameOverMSG2 BYTE " *  ****  *******  * * * * ******   *      *  * *   ****** ****   ", 0
+gameOverMSG3 BYTE "  *    * *       * *  *  * *          *    *    *    *      *   *  ", 0
+gameOverMSG4 BYTE "   **** *         **     * ******      ****     *    ****** *    * ", 0
+gameOverMSGPosition COORD <20, 6>
+gameOverMSGAttribute WORD LENGTHOF gameOverMSG0 DUP(1100b)
+
+; Prompt to return to menu after game over
+returnMSG BYTE "      Press ANY KEY to return to menu      ", 0
+returnMSGPosition COORD <22, 21>
+returnMSGAttribute WORD LENGTHOF returnMSG DUP(1110b)
+
+; Score labels and positions
+scoreMSG BYTE "Your Score: ", 0
+scoreMSGPosition COORD <28, 14>
+scoreMSGAttribute WORD LENGTHOF scoreMSG DUP(1111b)
+scorePosition COORD <40 ,14>
+
+highScoreMSG BYTE "High Score: ", 0
+highScoreMSGPosition COORD <28, 16>
+highScorePosition COORD <40, 16>
+
+; Live score display during the game and its position
+liveScoreMSG BYTE "Score: ", 0
+liveScorePosition COORD <2, 1>
+
+; Speed indicator label and its position
+speedMSG BYTE "Speed: ", 0
+speedPosition COORD <90, 1>
+
+; Handle and helper variables for console writes
+outputHandle DWORD 0
+bytesWritten DWORD 0
+;==============================================================================;
+;                                  For Menu /End                               ;
+;==============================================================================;
+
+;==============================================================================;
+;                               For Game Loop / Start                          ;
+;==============================================================================;
+; Cube current and previous positions (COORD structures)
+cubeCurrentPosition COORD <50, 5>
+cubePreviousPosition COORD <?, 5>
+; Character used to draw the cube (219 is a solid block)
+cubeBody BYTE 219
+; Line/platform definitions (positions and previous positions)
+line1 COORD <50, 15>
+line1Previous COORD <>
+line2 COORD <40,10>
+line2Previous COORD <>
+line3 COORD <60,20>
+line3Previous COORD <>
+line4 COORD <70,30>
+line4Previous COORD <>
+line5 COORD <75,40>
+line5Previous COORD <>
+; Byte array representing the visual platform (filled with '█' characters)
+lineBody BYTE lineSize DUP(219)
+; Buffer used to erase a previous line (spaces)
+removeLineBody BYTE lineSize DUP(' ')
+; Number of characters in a line
+lineLength DWORD lineSize
+; Random number storage
+randomNum DWORD ?
+; Score variables
+score DWORD 0
+highScore DWORD 0
+startTime DWORD ?
+lastScoreUpdate DWORD 0
+; Game tick counter (used for timing)
+TICK DWORD 0
+; Speed control variables
+baseSpeed DWORD 375
+currentSpeed DWORD 375
+; Interval in milliseconds to increase difficulty
+speedIncreaseInterval DWORD 5000  ; Increase speed every 5 seconds
+lastSpeedIncrease DWORD 0
+; Game border coordinates (COORD for right/bottom limits)
+border COORD <100, 30>
+; Flag for out-of-bounds
+isOut DWORD 0
+; On-ground flag and which line cube is on
+isOnTheGround DWORD 0
+whichLine DWORD ?
+; Write tracking (WriteConsoleOutputCharacter returns cells written)
+cellsWritten BYTE ?
+;==============================================================================;
+;                               For Game Loop /End                             ;
+;==============================================================================;
+
+.code
+
+;======================================================;
+;                Initialize the variables              ;
+;======================================================;
+initialize PROC USES eax
+    ; Set starting X for cube and line1 to 50
+    mov ax, 50
+    mov cubeCurrentPosition.X, ax
+    mov line1.X, ax
+    ; Set starting Y for cube to 5
+    mov ax, 5
+    mov cubeCurrentPosition.Y, ax
+    mov cubePreviousPosition.Y, ax
+    ; Set line1 Y to 15
+    mov ax, 15
+    mov line1.Y, ax
+    ; Initialize remaining lines X and Y positions
+    mov ax, 40
+    mov line2.X, ax
+    mov ax, 10
+    mov line2.Y, ax
+    mov ax, 60
+    mov line3.X, ax
+    mov ax, 20
+    mov line3.Y, ax
+    mov ax, 70
+    mov line4.X, ax
+    mov ax, 30
+    mov line4.Y, ax
+    mov ax, 75
+    mov line5.X, ax
+    mov ax, 40
+    mov line5.Y, ax 
+
+    ; Clear registers and reset numeric game state
+    xor eax, eax
+    mov score, eax
+    mov isOut, eax
+    mov TICK, eax
+    mov isOnTheGround, eax
+    
+    ; Reset speed to default (375 ms delay)
+    mov eax, 375
+    mov currentSpeed, eax
+    mov baseSpeed, eax
+    ret
+initialize ENDP
+
+;===================================================;
+;                     Move Cube                     ;
+;===================================================;
+; Left movement procedure
+cubeMoveLeft PROC USES ax bx
+    ; If cube is not at leftmost edge (>1), move left
+    .IF cubeCurrentPosition.X > 1
+        mov ax, cubeCurrentPosition.X
+        mov bx, cubeCurrentPosition.Y
+        ; Save previous position before moving
+        mov cubePreviousPosition.X, ax
+        mov cubePreviousPosition.Y, bx
+        sub cubeCurrentPosition.X, 1
+    .ENDIF
+    ret
+cubeMoveLeft ENDP
+
+; Right movement procedure
+cubeMoveRight PROC USES ax bx
+    ; If cube is left of right border, move right
+    .IF cubeCurrentPosition.X < borderX
+        mov ax, cubeCurrentPosition.X
+        mov bx, cubeCurrentPosition.Y
+        ; Save previous position
+        mov cubePreviousPosition.X, ax
+        mov cubePreviousPosition.Y, bx
+        add cubeCurrentPosition.X, 1
+    .ENDIF
+    ret
+cubeMoveRight ENDP
+
+; Move cube up (used when riding platforms)
+cubeMoveUp PROC USES ax bx
+    ; Save previous position
+    mov ax, cubeCurrentPosition.X
+    mov bx, cubeCurrentPosition.Y
+    mov cubePreviousPosition.X, ax
+    mov cubePreviousPosition.Y, bx
+    ; If cube is on ground, snap Y to the platform Y of the line it's on
+    .IF isOnTheGround == 1
+        .IF whichLine == 1
+            mov ax, line1.Y
+            mov cubeCurrentPosition.Y, ax
+        .ELSEIF whichLine == 2
+            mov ax, line2.Y
+            mov cubeCurrentPosition.Y, ax
+        .ELSEIF whichLine == 3
+            mov ax, line3.Y
+            mov cubeCurrentPosition.Y, ax
+        .ELSEIF whichLine == 4
+            mov ax, line4.Y
+            mov cubeCurrentPosition.Y, ax
+        .ELSEIF whichLine == 5
+            mov ax, line5.Y
+            mov cubeCurrentPosition.Y, ax
+        .ENDIF
+    .ELSE
+        ; If not on ground, move cube up by one (jump/fall mechanics)
+        sub cubeCurrentPosition.Y, 1 
+    .ENDIF
+    ret
+cubeMoveUp ENDP
+
+; Move cube down (gravity)
+cubeMoveDown PROC USES ax bx
+    ; Save previous position then increment Y to move down
+    mov ax, cubeCurrentPosition.X
+    mov bx, cubeCurrentPosition.Y
+    mov cubePreviousPosition.X, ax
+    mov cubePreviousPosition.Y, bx
+    add cubeCurrentPosition.Y, 1
+    ret
+cubeMoveDown ENDP
+
+;===================================================;
+;                 Get Random Number                 ;
+;===================================================;
+getRandomNumber PROC USES eax ebx
+    ; Initialize PRNG seed and get a pseudo-random number
+    call Randomize
+    mov eax, 1000000
+    call RandomRange
+    mov randomNum, eax
+    ret
+getRandomNumber ENDP
+
+;===================================================;
+;                     Move Line                     ;
+;===================================================;
+lineMoveUp PROC USES eax ebx ecx edx
+    ; Move line1 up (decrement Y). Save previous position first.
+    mov ax, line1.X
+    mov bx, line1.Y
+    mov line1Previous.X, ax
+    mov line1Previous.Y, bx
+    .IF line1.Y > 0
+        dec line1.Y
+    .ELSE
+        ; If line moved past top, re-randomize X and reset Y to bottom (30)
+        invoke getRandomNumber
+        xor edx, edx
+        mov eax, randomNum
+        mov ax, ax
+        mov bx, 55
+        div bx
+        shl dx, 1
+        mov line1.X, dx
+        mov line1.Y, 30
+    .ENDIF
+    ; Repeat same logic for line2
+    mov ax, line2.X
+    mov bx, line2.Y
+    mov line2Previous.X, ax
+    mov line2Previous.Y, bx
+    .IF line2.Y > 0
+        dec line2.Y
+    .ELSE
+        invoke getRandomNumber
+        xor edx, edx
+        mov eax, randomNum
+        mov ax, ax
+        mov bx, 55
+        div bx
+        shl dx, 1
+        mov line2.X, dx
+        mov line2.Y, 30
+    .ENDIF
+    ; Repeat for line3
+    mov ax, line3.X
+    mov bx, line3.Y
+    mov line3Previous.X, ax
+    mov line3Previous.Y, bx
+    .IF line3.Y > 0
+        dec line3.Y
+    .ELSE
+        invoke getRandomNumber
+        xor edx, edx
+        mov eax, randomNum
+        mov ax, ax
+        mov bx, 55
+        div bx
+        shl dx, 1
+        mov line3.X, dx
+        mov line3.Y, 30
+    .ENDIF
+    ; Repeat for line4
+    mov ax, line4.X
+    mov bx, line4.Y
+    mov line4Previous.X, ax
+    mov line4Previous.Y, bx
+    .IF line4.Y > 0
+        dec line4.Y
+    .ELSE
+        invoke getRandomNumber
+        xor edx, edx
+        mov eax, randomNum
+        mov ax, ax
+        mov bx, 55
+        div bx
+        shl dx, 1
+        mov line4.X, dx
+        mov line4.Y, 30
+    .ENDIF
+    ; Repeat for line5
+    mov ax, line5.X
+    mov bx, line5.Y
+    mov line5Previous.X, ax
+    mov line5Previous.Y, bx
+    .IF line5.Y > 0
+        dec line5.Y
+    .ELSE
+        invoke getRandomNumber
+        xor edx, edx
+        mov eax, randomNum
+        mov ax, ax
+        mov bx, 55
+        div bx
+        shl dx, 1
+        mov line5.X, dx
+        mov line5.Y, 30
+    .ENDIF
+    ret
+lineMoveUp ENDP
+
+;===================================================;
+;                     Draw Cube                     ;
+;===================================================;
+drawCube PROC USES eax
+    ; Erase the cube at its previous position (move cursor and write a space)
+    invoke SetConsoleCursorPosition, outputHandle, cubePreviousPosition
+    mov eax, 15 + 0*16
+    call SetTextColor
+    push eax
+    mov al, ' '
+    call WriteChar
+    ; Draw the cube at its current position with a pulsing color based on TICK
+    invoke SetConsoleCursorPosition, outputHandle, cubeCurrentPosition
+    mov eax, TICK
+    and eax, 64
+    .IF eax == 0
+        mov eax, 14 + 1*16  ; choose color attribute (yellow on blue)
+    .ELSE
+        mov eax, 15 + 9*16  ; alternate color (white on light blue)
+    .ENDIF
+    call SetTextColor
+    mov al, cubeBody
+    call WriteChar
+    ; Restore previous color attribute
+    pop eax
+    call SetTextColor
+    ret
+drawCube ENDP
+
+;===================================================;
+;                     Draw Line                     ;
+;===================================================;
+drawLine PROC USES eax
+    ; Set platform color (green)
+    mov eax, 10 + 0*16
+    call SetTextColor
+
+    ; Erase previous line1 by writing spaces at previous position
+    invoke WriteConsoleOutputCharacter,
+      outputHandle, 
+      ADDR removeLineBody,
+      lineLength,
+      line1Previous,
+      ADDR cellsWritten
+ 
+    ; Erase previous line2
+    invoke WriteConsoleOutputCharacter,
+      outputHandle, 
+      ADDR removeLineBody,
+      lineLength,
+      line2Previous,
+      ADDR cellsWritten
+ 
+    ; Erase previous line3
+    invoke WriteConsoleOutputCharacter,
+      outputHandle, 
+      ADDR removeLineBody,
+      lineLength,
+      line3Previous,
+      ADDR cellsWritten
+    
+    ; Erase previous line4
+    invoke WriteConsoleOutputCharacter,
+      outputHandle, 
+      ADDR removeLineBody,
+      lineLength,
+      line4Previous,
+      ADDR cellsWritten
+
+    ; Erase previous line5
+    invoke WriteConsoleOutputCharacter,
+      outputHandle, 
+      ADDR removeLineBody,
+      lineLength,
+      line5Previous,
+      ADDR cellsWritten
+
+    ; Draw current line1 characters at its position
+    invoke WriteConsoleOutputCharacter, 
+      outputHandle, 
+      ADDR lineBody,
+      lineLength,
+      line1,
+      ADDR cellsWritten
+
+    ; Draw current line2
+    invoke WriteConsoleOutputCharacter, 
+      outputHandle, 
+      ADDR lineBody,
+      lineLength,
+      line2,
+      ADDR cellsWritten
+
+    ; Draw current line3
+    invoke WriteConsoleOutputCharacter, 
+      outputHandle, 
+      ADDR lineBody,
+      lineLength,
+      line3,
+      ADDR cellsWritten
+
+    ; Draw current line4
+    invoke WriteConsoleOutputCharacter, 
+      outputHandle, 
+      ADDR lineBody,
+      lineLength,
+      line4,
+      ADDR cellsWritten
+
+    ; Draw current line5
+    invoke WriteConsoleOutputCharacter, 
+      outputHandle, 
+      ADDR lineBody,
+      lineLength,
+      line5,
+      ADDR cellsWritten
+    
+    ; Restore default text color (white on black)
+    mov eax, 15 + 0*16
+    call SetTextColor
+    ret
+drawLine ENDP
+
+;===================================================;
+;          Check if object is out of border         ;
+;===================================================;
+isOutOfBorder PROC
+    ; If cube's X/Y outside allowed rectangle, set isOut = 1
+    .IF cubeCurrentPosition.X >= borderX  
+        mov isOut, 1
+    .ELSEIF cubeCurrentPosition.X <= 1
+        mov isOut, 1
+    .ELSEIF cubeCurrentPosition.Y > borderY  
+        mov isOut, 1
+    .ELSEIF cubeCurrentPosition.Y < 1
+        mov isOut, 1
+    .ELSE
+        mov isOut, 0
+    .ENDIF
+    ret
+isOutOfBorder ENDP
+
+;===================================================;
+;            Check if object is grounded            ;
+;===================================================;
+isGrounded PROC USES eax ebx ecx edx
+    ; Check collision with line1: compute line X range and Y range
+    mov ax, line1.X
+    mov bx, ax
+    mov cx, line1.Y
+    mov dx, cx
+    add ax, lineSize
+    sub dx, 1
+    ; If cube X is within platform X-range and cube Y is within platform Y-range, it's on ground
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+        mov isOnTheGround, 1
+        mov whichLine, 1
+        jmp leave_proc
+    .ENDIF
+    ; Check collision with line2
+    mov ax, line2.X
+    mov bx, ax
+    mov cx, line2.Y
+    mov dx, cx
+    add ax, lineSize
+    sub dx, 1
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+        mov isOnTheGround, 1
+        mov whichLine, 2
+        jmp leave_proc
+    .ENDIF
+    ; Check collision with line3
+    mov ax, line3.X
+    mov bx, ax
+    mov cx, line3.Y
+    mov dx, cx
+    add ax, lineSize
+    sub dx, 1
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+        mov isOnTheGround, 1
+        mov whichLine, 3
+        jmp leave_proc
+    .ENDIF
+    ; Check collision with line4
+    mov ax, line4.X
+    mov bx, ax
+    mov cx, line4.Y
+    mov dx, cx
+    add ax, lineSize
+    sub dx, 1
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+        mov isOnTheGround, 1
+        mov whichLine, 4
+        jmp leave_proc
+    .ENDIF
+    ; Check collision with line5
+    mov ax, line5.X
+    mov bx, ax
+    mov cx, line5.Y
+    mov dx, cx
+    add ax, lineSize
+    sub dx, 1
+    .IF cubeCurrentPosition.X >= bx && cubeCurrentPosition.X <= ax && cubeCurrentPosition.Y >= dx  && cubeCurrentPosition.Y <= cx
+        mov isOnTheGround, 1
+        mov whichLine, 5
+        jmp leave_proc
+    .ENDIF
+    ; If none matched, not on ground
+    mov isOnTheGround, 0
+leave_proc:
+    ret
+isGrounded ENDP
+
+;===================================================;
+;                       Score                       ;
+;===================================================;
+get_score PROC USES eax
+    ; Compute elapsed milliseconds since startTime and store into score
+    call GetMseconds
+    sub eax, startTime
+    mov score, eax
+    ret
+get_score ENDP
+
+;===================================================;
+;              Display Live Score                   ;
+;===================================================;
+displayLiveScore PROC USES eax
+    ; Move cursor to live score position and set color
+    invoke SetConsoleCursorPosition, outputHandle, liveScorePosition
+    mov eax, 11 + 0*16  ; Cyan text
+    call SetTextColor
+    ; Write "Score: " label
+    mov edx, OFFSET liveScoreMSG
+    call WriteString
+    ; Update numeric score and print decimal
+    call get_score
+    mov eax, score
+    call WriteDec
+    mov al, ' '
+    call WriteChar
+    call WriteChar
+    ; Restore default color
+    mov eax, 15 + 0*16
+    call SetTextColor
+    ret
+displayLiveScore ENDP
+
+;===================================================;
+;              Update Game Speed                    ;
+;===================================================;
+updateSpeed PROC USES eax ebx edx
+    ; Check time since last speed increase
+    call GetMseconds
+    sub eax, lastSpeedIncrease
+    .IF eax >= speedIncreaseInterval
+        ; Reduce delay (increase difficulty) but cap at minimum 150ms
+        mov eax, currentSpeed
+        .IF eax > 150  ; Don't go below 150ms
+            sub eax, 25
+            mov currentSpeed, eax
+        .ENDIF
+        ; Record the time when speed was increased
+        call GetMseconds
+        mov lastSpeedIncrease, eax
+    .ENDIF
+    ret
+updateSpeed ENDP
+
+;===================================================;
+;                      GameLoop                     ;
+;===================================================;
+GameLoop PROC USES eax ebx ecx edx
+    ; Clear screen and initialize speed-timer
+    call Clrscr
+    call GetMseconds
+    mov lastSpeedIncrease, eax
+    
+    .WHILE TRUE
+        ; Update grounded state before processing input
+        invoke isGrounded
+        ; Read keypress into AX (non-blocking ReadKey in Irvine)
+        call ReadKey
+        ; If 'a' or 'A' pressed (scan codes compared), move left
+        .IF ax == 1E61h || ax == 1E41h  ; 'a' or 'A'
+            invoke cubeMoveLeft
+            invoke isGrounded
+        .ELSEIF ax == 2064h || ax == 2044h  ; 'd' or 'D'
+            ; If 'd'/'D', move right and re-check grounded state
+            invoke cubeMoveRight
+            invoke isGrounded
+        .ELSEIF ax == 011Bh  ; ESC to pause/exit (currently placeholder)
+            ; Could add pause functionality here
+        .ENDIF
+        
+        ; Move Lines & Cube vertically based on timing (TICK/currentSpeed)
+        xor edx, edx
+        mov eax, TICK
+        mov ebx, currentSpeed  ; Use dynamic speed variable
+        div ebx
+        ; If division remainder is 0, perform movement step
+        .IF edx == 0
+            .IF isOnTheGround == 1
+                ; Move platforms up and keep cube on platform
+                invoke lineMoveUp
+                invoke cubeMoveUp
+            .ELSEIF isOnTheGround == 0
+                 ; Move platforms and let cube fall
+                 invoke lineMoveUp
+                 invoke cubeMoveDown
+            .ENDIF
+            mov TICK, 0
+        .ENDIF
+        
+        ; Draw platforms and cube, update displays and speed
+        invoke drawLine
+        invoke drawCube
+        invoke displayLiveScore
+        invoke updateSpeed
+        invoke isOutOfBorder
+        
+        ; If cube is out of bounds, exit game loop
+        .IF isOut == 1
+            jmp leave_proc
+        .ENDIF
+        ; Increment TICK to advance timing
+        inc TICK
+    .ENDW
+    leave_proc:
+    ret
+GameLoop ENDP
+
+;===================================================;
+;                        Main                       ;
+;===================================================;
+main PROC
+newGame:
+    ; Get console output handle and clear screen
+    INVOKE GetStdHandle, STD_OUTPUT_HANDLE
+    mov outputHandle, eax
+    CALL Clrscr
+
+    ; Set console window title
+    INVOKE SetConsoleTitle, ADDR titleMSG
+
+    ; Draw the title ASCII art with attributes and characters (line 0)
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameMSGAttribute,
+        LENGTHOF gameMSG0,
+        gameMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameMSG0,
+        LENGTHOF gameMSG0,
+        gameMSGPosition,
+        ADDR bytesWritten
+    
+    ; Move cursor down one row and draw next line (gameMSG1) with attributes
+    inc gameMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameMSGAttribute,
+        LENGTHOF gameMSG1,
+        gameMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameMSG1,
+        LENGTHOF gameMSG1,
+        gameMSGPosition,
+        ADDR bytesWritten
+    
+    ; Draw gameMSG2
+    inc gameMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameMSGAttribute,
+        LENGTHOF gameMSG2,
+        gameMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameMSG2,
+        LENGTHOF gameMSG2,
+        gameMSGPosition,
+        ADDR bytesWritten
+    
+    ; Draw gameMSG3
+    inc gameMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameMSGAttribute,
+        LENGTHOF gameMSG3,
+        gameMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameMSG3,
+        LENGTHOF gameMSG3,
+        gameMSGPosition,
+        ADDR bytesWritten
+    
+    ; Draw gameMSG4 and then reset the Y offset back by 4
+    inc gameMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameMSGAttribute,
+        LENGTHOF gameMSG4,
+        gameMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameMSG4,
+        LENGTHOF gameMSG4,
+        gameMSGPosition,
+        ADDR bytesWritten
+    sub gameMSGPosition.Y, 4
+
+    ; Draw instruction text with its color
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR instructionMSGAttribute,
+        LENGTHOF instructionMSG,
+        instructionMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE  WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR instructionMSG,
+        LENGTHOF instructionMSG,
+        instructionMSGPosition,
+        ADDR bytesWritten
+
+    ; Draw controls message
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR controlsMSGAttribute,
+        LENGTHOF controlsMSG,
+        controlsMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE  WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR controlsMSG,
+        LENGTHOF controlsMSG,
+        controlsMSGPosition,
+        ADDR bytesWritten
+
+    ; Draw start prompt
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR startMSGAttribute,
+        LENGTHOF startMSG,
+        startMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR startMSG,
+        LENGTHOF startMSG,
+        startMSGPosition,
+        ADDR bytesWritten
+
+    ; Draw exit prompt
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR exitMSGAttribute,
+        LENGTHOF exitMSG,
+        exitMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR exitMSG,
+        LENGTHOF exitMSG,
+        exitMSGPosition,
+        ADDR bytesWritten
+
+    ; Wait for any key press (ReadChar returns 0 while no key)
+    xor ax, ax
+waitForInput:
+    CALL ReadChar
+    CMP ax, 0
+    JE waitForInput
+    CMP ax, 011Bh
+    JE exitGame
+
+start:
+    ; Record start time (milliseconds) for scoring
+    push eax
+    call GetMseconds
+    mov startTime, eax
+    pop eax
+
+    ; Enter main game loop
+    invoke GameLoop
+
+gameOver:
+    ; Clear the screen and show game-over ASCII art
+    CALL Clrscr
+
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameOverMSGAttribute,
+        LENGTHOF gameOverMSG0,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameOverMSG0,
+        LENGTHOF gameOverMSG0,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+    
+    ; Draw remaining game-over lines (1..4)
+    inc gameOverMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameOverMSGAttribute,
+        LENGTHOF gameOverMSG1,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameOverMSG1,
+        LENGTHOF gameOverMSG1,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    inc gameOverMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameOverMSGAttribute,
+        LENGTHOF gameOverMSG2,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameOverMSG2,
+        LENGTHOF gameOverMSG2,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+    
+    inc gameOverMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameOverMSGAttribute,
+        LENGTHOF gameOverMSG3,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameOverMSG3,
+        LENGTHOF gameOverMSG3,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    inc gameOverMSGPosition.Y
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR gameOverMSGAttribute,
+        LENGTHOF gameOverMSG4,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR gameOverMSG4,
+        LENGTHOF gameOverMSG4,
+        gameOverMSGPosition,
+        ADDR bytesWritten
+    sub gameOverMSGPosition.Y, 4
+
+    ; Display the player's score label
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR scoreMSGAttribute,
+        LENGTHOF scoreMSG,
+        scoreMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR scoreMSG,
+        LENGTHOF scoreMSG,
+        scoreMSGPosition,
+        ADDR bytesWritten
+
+    ; Move cursor to score numeric position and print computed score
+    INVOKE SetConsoleCursorPosition,
+        outputHandle,
+        scorePosition
+    call get_score
+    mov eax, score
+    
+    ; Update high score if current score is greater
+    .IF eax > highScore
+        mov highScore, eax
+    .ENDIF
+    CALL WriteDec
+    
+    ; Show high score label and value
+    INVOKE SetConsoleCursorPosition,
+        outputHandle,
+        highScoreMSGPosition
+    mov edx, OFFSET highScoreMSG
+    call WriteString
+    INVOKE SetConsoleCursorPosition,
+        outputHandle,
+        highScorePosition
+    mov eax, highScore
+    call WriteDec
+    
+    ; Show return-to-menu prompt
+    INVOKE WriteConsoleOutputAttribute,
+        outputHandle,
+        ADDR returnMSGAttribute,
+        LENGTHOF returnMSG,
+        returnMSGPosition,
+        ADDR bytesWritten
+
+    INVOKE WriteConsoleOutputCharacter,
+        outputHandle,
+        ADDR returnMSG,
+        LENGTHOF returnMSG,
+        returnMSGPosition,
+        ADDR bytesWritten
+
+    ; Wait for key press to restart
+    xor ax, ax
+waitTillInput:
+    CALL ReadChar
+    CMP ax, 0
+    JE waitTillInput
+
+    ; Re-initialize variables and start a new game
+    CALL initialize
+    JMP newGame
+
+exitGame:
+; End of main procedure (label resolves to entry)
+main ENDP
+END main
